@@ -194,29 +194,37 @@ static void *find_fit(size_t asize){
 static void place(void *bp, size_t asize){
     size_t size = GET_SIZE(HDRP(bp));
     size_t remain_size = size - asize;
+    unsigned int is_alloc = GET_ALLOC(HDRP(bp));
     // printf("place begin size=%d remain_size=%d\n",size,remain_size);
     if (remain_size <= 6*WSIZE){
         PUT(HDRP(bp), PACK(size, 1));
         PUT(FTRP(bp), PACK(size, 1));
         // printf("pred_ptr=%d succ_ptr=%d\n",(int)PRED_PTR(bp),(int)SUCC_PTR(bp));
-        PUT_PTR(SUCC(PRED_PTR(bp)), SUCC_PTR(bp));
-        PUT_PTR(PRED(SUCC_PTR(bp)), PRED_PTR(bp));
-        if (head_listp == bp)
-            head_listp = SUCC_PTR(bp);
+        if (!is_alloc){
+            PUT_PTR(SUCC(PRED_PTR(bp)), SUCC_PTR(bp));
+            PUT_PTR(PRED(SUCC_PTR(bp)), PRED_PTR(bp));
+            if (head_listp == bp)
+                head_listp = SUCC_PTR(bp);
+        }
     }
     else{
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
         // printf("pred_ptr=%d succ_ptr=%d\n",(int)PRED_PTR(bp),(int)SUCC_PTR(bp));
-        PUT_PTR(SUCC(PRED_PTR(bp)), NEXT_BLKP(bp));
-        PUT_PTR(PRED(NEXT_BLKP(bp)), PRED_PTR(bp));
-        PUT_PTR(SUCC(NEXT_BLKP(bp)), SUCC_PTR(bp));
-        PUT_PTR(PRED(SUCC_PTR(bp)), NEXT_BLKP(bp));
         // printf("next_blkp_pred_ptr=%d\n",(int)PRED_PTR(NEXT_BLKP(bp)));
         PUT(HDRP(NEXT_BLKP(bp)), PACK(remain_size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(remain_size, 0));
-        if (head_listp == bp)
-            head_listp = NEXT_BLKP(bp);
+        if (!is_alloc){
+            PUT_PTR(SUCC(PRED_PTR(bp)), NEXT_BLKP(bp));
+            PUT_PTR(PRED(NEXT_BLKP(bp)), PRED_PTR(bp));
+            PUT_PTR(SUCC(NEXT_BLKP(bp)), SUCC_PTR(bp));
+            PUT_PTR(PRED(SUCC_PTR(bp)), NEXT_BLKP(bp));
+            if (head_listp == bp)
+                head_listp = NEXT_BLKP(bp);
+        }
+        else{
+            coalesce(NEXT_BLKP(bp));
+        }
     }
     // printf("place end\n");
 }
@@ -286,6 +294,26 @@ void *realloc(void *oldptr, size_t size){
     /* If oldptr is NULL, then this is just malloc. */
     if(oldptr == NULL) {
         return malloc(size);
+    }
+
+    oldsize = GET_SIZE(HDRP(oldptr));
+    size = ALIGN(MAX(size + DSIZE, 6 * WSIZE));
+    if (size <= oldsize){
+        place(oldptr, size);
+        return oldptr;
+    }
+
+    if (!GET_ALLOC(HDRP(NEXT_BLKP(oldptr))) &&
+        oldsize + GET_SIZE(HDRP(NEXT_BLKP(oldptr))) >= size){
+        PUT_PTR(SUCC(PRED_PTR(NEXT_BLKP(oldptr))), SUCC_PTR(NEXT_BLKP(oldptr)));
+        PUT_PTR(PRED(SUCC_PTR(NEXT_BLKP(oldptr))), PRED_PTR(NEXT_BLKP(oldptr)));
+        if (head_listp == NEXT_BLKP(oldptr))
+            head_listp = SUCC_PTR(NEXT_BLKP(oldptr));
+        oldsize += GET_SIZE(HDRP(NEXT_BLKP(oldptr)));
+        PUT(HDRP(oldptr), PACK(oldsize, 1));
+        PUT(FTRP(oldptr), PACK(oldsize, 1));
+        place(oldptr, size);
+        return oldptr;
     }
 
     newptr = malloc(size);
