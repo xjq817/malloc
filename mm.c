@@ -79,7 +79,7 @@
 #define SUCC_PTR(bp)        ((bp) ? (GET_PTR(SUCC(bp))) : 0)
 
 #define RANGE_SIZE          (7)
-#define RANGE               (16)
+#define RANGE               (53)
 
 static char *heap_listp = 0;
 static char *head_listp[RANGE_SIZE];
