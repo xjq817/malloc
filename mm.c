@@ -50,7 +50,8 @@
 
 #define WSIZE               4
 #define DSIZE               8
-#define CHUNKSIZE           (1<<12)
+#define INITSIZE            24
+#define CHUNKSIZE           (1<<8)
 
 #define MAX(x,y)            ((x) > (y) ? (x) : (y))
 
@@ -77,8 +78,36 @@
 #define PRED_PTR(bp)        ((bp) ? (GET_PTR(PRED(bp))) : 0)
 #define SUCC_PTR(bp)        ((bp) ? (GET_PTR(SUCC(bp))) : 0)
 
+#define RANGE_SIZE          (7)
+#define RANGE               (16)
+
 static char *heap_listp = 0;
-static char *head_listp = 0;
+static char *head_listp[RANGE_SIZE];
+
+static size_t get_range(size_t size){
+    size_t id = 0, upper = RANGE;
+    while(upper < size && id < RANGE_SIZE - 1){
+        upper <<= 2;
+        id++;
+    }
+    return id;
+}
+
+static void add_into_list(void *bp){
+    size_t id = get_range(GET_SIZE(HDRP(bp)));
+    PUT_PTR(PRED(bp), 0);
+    PUT_PTR(SUCC(bp), head_listp[id]);
+    PUT_PTR(PRED(head_listp[id]), bp);
+    head_listp[id] = bp;
+}
+
+static void delete_from_list(void *bp){
+    PUT_PTR(SUCC(PRED_PTR(bp)), SUCC_PTR(bp));
+    PUT_PTR(PRED(SUCC_PTR(bp)), PRED_PTR(bp));
+    size_t id = get_range(GET_SIZE(HDRP(bp)));
+    if (head_listp[id] == bp)
+        head_listp[id] = SUCC_PTR(bp);
+}
 
 static void *coalesce(void *bp){
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
@@ -86,50 +115,37 @@ static void *coalesce(void *bp){
     size_t size = GET_SIZE(HDRP(bp));
 
     if (prev_alloc && next_alloc){
-        if (!head_listp){
-            head_listp = bp;
-            PUT_PTR(PRED(bp), 0);
-            PUT_PTR(SUCC(bp), 0);
-        }
-        else{
-            char *last_listp = 0;
-            char *now_listp = head_listp;
-            if (head_listp > bp) head_listp = bp;
-            while(now_listp && now_listp < bp){
-                last_listp = now_listp;
-                now_listp = SUCC_PTR(now_listp);
-            }
-            PUT_PTR(SUCC(last_listp), bp);
-            PUT_PTR(PRED(bp), last_listp);
-            PUT_PTR(SUCC(bp), now_listp);
-            PUT_PTR(PRED(now_listp), bp);
-        }
+        add_into_list(bp);
         return bp;
     }
     else if (prev_alloc && !next_alloc){
-        if (!head_listp || head_listp >= NEXT_BLKP(bp))
-            head_listp = bp;
-        PUT_PTR(SUCC(PRED_PTR(NEXT_BLKP(bp))), bp);
-        PUT_PTR(PRED(bp), PRED_PTR(NEXT_BLKP(bp)));
-        PUT_PTR(SUCC(bp), SUCC_PTR(NEXT_BLKP(bp)));
-        PUT_PTR(PRED(SUCC_PTR(NEXT_BLKP(bp))), bp);
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        
+        delete_from_list(NEXT_BLKP(bp));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
+        add_into_list(bp);
     }
     else if (!prev_alloc && next_alloc){
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        
+        delete_from_list(PREV_BLKP(bp));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        add_into_list(PREV_BLKP(bp));
+        
         bp = PREV_BLKP(bp);
     }
     else{
-        PUT_PTR(SUCC(PREV_BLKP(bp)), SUCC_PTR(NEXT_BLKP(bp)));
-        PUT_PTR(PRED(SUCC_PTR(NEXT_BLKP(bp))), PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp)))
              + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+        
+        delete_from_list(PREV_BLKP(bp));
+        delete_from_list(NEXT_BLKP(bp));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        add_into_list(PREV_BLKP(bp));
+
         bp = PREV_BLKP(bp);
     }
     return bp;
@@ -157,7 +173,8 @@ static void *extend_heap(size_t words){
  */
 int mm_init(void){
     // puts("mm_init begin");
-    head_listp = 0;
+    for (size_t i = 0; i < RANGE_SIZE; i++)
+        head_listp[i] = 0;
     if ((heap_listp = mem_sbrk(8*WSIZE)) == (void *)-1)
         return -1;
     PUT(heap_listp, 0);
@@ -170,24 +187,27 @@ int mm_init(void){
 
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL)
         return -1;
-    // mm_checkheap(1);
-    // mm_checkheap(2);
     // puts("mm_init finish");
     return 0;
 }
 
 static void *find_fit(size_t asize){
-    char* bp = head_listp;
+    size_t id = get_range(asize);
     // printf("find begin\n");
-    while(bp){
-        size_t size = GET_SIZE(HDRP(bp));
-        if (size >= asize){
-            // printf("find it\n");
-            return bp;
+    while(id < RANGE_SIZE){
+        // printf("%d\n",id);
+        char* bp = head_listp[id];
+        while(bp){
+            size_t size = GET_SIZE(HDRP(bp));
+            if (size >= asize){
+                // printf("find finish\n");
+                return bp;
+            }
+            bp = SUCC_PTR(bp);
         }
-        bp = SUCC_PTR(bp);
+        id++;
     }
-    // printf("not find it\n");
+    // printf("find fail\n");
     return NULL;
 }
 
@@ -195,38 +215,23 @@ static void place(void *bp, size_t asize){
     size_t size = GET_SIZE(HDRP(bp));
     size_t remain_size = size - asize;
     unsigned int is_alloc = GET_ALLOC(HDRP(bp));
-    // printf("place begin size=%d remain_size=%d\n",size,remain_size);
+    if (!is_alloc) delete_from_list(bp);
     if (remain_size <= 6*WSIZE){
         PUT(HDRP(bp), PACK(size, 1));
         PUT(FTRP(bp), PACK(size, 1));
-        // printf("pred_ptr=%d succ_ptr=%d\n",(int)PRED_PTR(bp),(int)SUCC_PTR(bp));
-        if (!is_alloc){
-            PUT_PTR(SUCC(PRED_PTR(bp)), SUCC_PTR(bp));
-            PUT_PTR(PRED(SUCC_PTR(bp)), PRED_PTR(bp));
-            if (head_listp == bp)
-                head_listp = SUCC_PTR(bp);
-        }
     }
     else{
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
-        // printf("pred_ptr=%d succ_ptr=%d\n",(int)PRED_PTR(bp),(int)SUCC_PTR(bp));
-        // printf("next_blkp_pred_ptr=%d\n",(int)PRED_PTR(NEXT_BLKP(bp)));
         PUT(HDRP(NEXT_BLKP(bp)), PACK(remain_size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(remain_size, 0));
         if (!is_alloc){
-            PUT_PTR(SUCC(PRED_PTR(bp)), NEXT_BLKP(bp));
-            PUT_PTR(PRED(NEXT_BLKP(bp)), PRED_PTR(bp));
-            PUT_PTR(SUCC(NEXT_BLKP(bp)), SUCC_PTR(bp));
-            PUT_PTR(PRED(SUCC_PTR(bp)), NEXT_BLKP(bp));
-            if (head_listp == bp)
-                head_listp = NEXT_BLKP(bp);
+            add_into_list(NEXT_BLKP(bp));
         }
         else{
             coalesce(NEXT_BLKP(bp));
         }
     }
-    // printf("place end\n");
 }
 
 /*
@@ -242,7 +247,7 @@ void *malloc(size_t size){
     if (size == 0)
         return NULL;
     
-    asize = ALIGN(MAX(size + DSIZE, 6 * WSIZE));
+    asize = ALIGN(MAX(size + DSIZE, INITSIZE));
 
     if ((bp = find_fit(asize)) != NULL){
         // printf("can find: %d\n",GET_SIZE(HDRP(bp)));
@@ -305,10 +310,8 @@ void *realloc(void *oldptr, size_t size){
 
     if (!GET_ALLOC(HDRP(NEXT_BLKP(oldptr))) &&
         oldsize + GET_SIZE(HDRP(NEXT_BLKP(oldptr))) >= size){
-        PUT_PTR(SUCC(PRED_PTR(NEXT_BLKP(oldptr))), SUCC_PTR(NEXT_BLKP(oldptr)));
-        PUT_PTR(PRED(SUCC_PTR(NEXT_BLKP(oldptr))), PRED_PTR(NEXT_BLKP(oldptr)));
-        if (head_listp == NEXT_BLKP(oldptr))
-            head_listp = SUCC_PTR(NEXT_BLKP(oldptr));
+
+        delete_from_list(NEXT_BLKP(oldptr));
         oldsize += GET_SIZE(HDRP(NEXT_BLKP(oldptr)));
         PUT(HDRP(oldptr), PACK(oldsize, 1));
         PUT(FTRP(oldptr), PACK(oldsize, 1));
@@ -352,8 +355,8 @@ void *calloc (size_t nmemb, size_t size){
  *      so nah!
  */
 void mm_checkheap(int verbose){
-	puts("***********************************");
-        /*Get gcc to be quiet. */
+	/*puts("***********************************");
+        Get gcc to be quiet. 
     char* bp = heap_listp;
     size_t size = GET_SIZE(HDRP(bp));
     int alloccc;
@@ -382,5 +385,5 @@ void mm_checkheap(int verbose){
             printf("block:%d address: %ld size: %lu alloc: %d nxt: %lu \n",cnt,bp,size,alloccc,SUCC_PTR(bp));
         }
     }
-    puts("");
+    puts("");*/
 }
