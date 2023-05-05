@@ -118,16 +118,12 @@ static void *coalesce(void *bp){
         PUT(FTRP(bp), PACK(size, 0));
     }
     else if (!prev_alloc && next_alloc){
-        if (!head_listp || head_listp >= PREV_BLKP(bp))
-            head_listp = PREV_BLKP(bp);
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
     else{
-        if (!head_listp || head_listp >= PREV_BLKP(bp))
-            head_listp = PREV_BLKP(bp);
         PUT_PTR(SUCC(PREV_BLKP(bp)), SUCC_PTR(NEXT_BLKP(bp)));
         PUT_PTR(PRED(SUCC_PTR(NEXT_BLKP(bp))), PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp)))
