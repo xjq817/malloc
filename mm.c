@@ -384,8 +384,8 @@ void mm_checkheap(int verbose){
             size_t size = GET_SIZE(HDRP(bp));
             unsigned alloc = GET_ALLOC(HDRP(bp));
 
-            printf("block:%d ,address: %lu ,size: %lu, alloc :%u, prev_block: %lu ,next_block : %lu\n",
-                id, (size_t)bp, size, alloc, (size_t)PREV_BLKP(bp),(size_t)NEXT_BLKP(bp));
+            printf("block:%d ,address: %lu ,size: %lu, alloc :%u ,next_block : %lu\n",
+                id, (size_t)bp, size, alloc, (size_t)NEXT_BLKP(bp));
         }
         printf("finish check heap list\n");
     }
