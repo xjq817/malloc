@@ -3,11 +3,11 @@ this code uses explicit allocator, LIFO strategy and segregated fit
 
 the structure of my block:
 
-header (4 byte) + (size | alloc)
-succ   (8 byte) : the location of next ptr on free list if it is not allocated
-prev   (8 byte) : the location of prev ptr on free list if it is not allocated
+header (4 byte) + (size | l_alloc | alloc)
+succ   (4 byte) : the offset of next ptr on free list if it is not allocated
+prev   (4 byte) : the offset of prev ptr on free list if it is not allocated
 ...   block   ... 
-footer (4 byte) + (size | alloc)
+footer (4 byte) + (size | l_alloc | alloc)
 
 The structure of free list:
 
